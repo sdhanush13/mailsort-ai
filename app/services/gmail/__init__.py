@@ -67,6 +67,13 @@ from app.services.gmail.important import (
     mark_important_background,
     get_important_status,
 )
+from app.services.gmail.organize import (
+    organize_scan_background,
+    organize_apply_background,
+    get_organize_status,
+    get_organize_results,
+)
+from app.services.gmail.llm import check_llm
 
 # Export private helper functions with underscore-prefixed aliases for backward compatibility.
 # These are used by tests that import the original function names from this module.
@@ -120,4 +127,10 @@ __all__ = [
     "scan_emails",
     # Unsubscribe
     "unsubscribe_single",
+    # Auto-organize
+    "check_llm",
+    "get_organize_results",
+    "get_organize_status",
+    "organize_apply_background",
+    "organize_scan_background",
 ]

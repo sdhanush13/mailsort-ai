@@ -21,6 +21,8 @@ from app.models import (
     RemoveLabelRequest,
     ArchiveRequest,
     MarkImportantRequest,
+    OrganizeScanRequest,
+    OrganizeApplyRequest,
 )
 from app.services import (
     scan_emails,
@@ -38,7 +40,10 @@ from app.services import (
     remove_label_from_senders_background,
     archive_emails_background,
     mark_important_background,
+    organize_scan_background,
+    organize_apply_background,
 )
+from app.core import state
 
 router = APIRouter(prefix="/api", tags=["Actions"])
 logger = logging.getLogger(__name__)
@@ -246,5 +251,45 @@ async def api_mark_important(
         )
     background_tasks.add_task(
         partial(mark_important_background, request.senders, important=request.important)
+    )
+    return {"status": "started"}
+
+
+@router.post("/organize-scan")
+async def api_organize_scan(
+    request: OrganizeScanRequest, background_tasks: BackgroundTasks
+):
+    """Classify emails into labels and build a preview plan (no changes made)."""
+    if state.organize_status.get("running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An organize operation is already running",
+        )
+    filters_dict = (
+        request.filters.model_dump(exclude_none=True) if request.filters else None
+    )
+    background_tasks.add_task(
+        organize_scan_background, request.limit, filters_dict, request.use_llm
+    )
+    return {"status": "started"}
+
+
+@router.post("/organize-apply")
+async def api_organize_apply(
+    request: OrganizeApplyRequest, background_tasks: BackgroundTasks
+):
+    """Apply the previewed plan: create labels and label the emails."""
+    if state.organize_status.get("running"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An organize operation is already running",
+        )
+    if not state.organize_plan:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No preview to apply - run a scan first",
+        )
+    background_tasks.add_task(
+        partial(organize_apply_background, request.labels, archive=request.archive)
     )
     return {"status": "started"}

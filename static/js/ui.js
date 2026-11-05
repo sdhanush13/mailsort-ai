@@ -53,6 +53,12 @@ GmailCleaner.UI = {
         if (viewName === 'markread') {
             GmailCleaner.MarkRead.refreshUnreadCount();
         }
+
+        // Check AI availability and restore any existing preview
+        if (viewName === 'organize' && GmailCleaner.Organize) {
+            GmailCleaner.Organize.checkLlm();
+            GmailCleaner.Organize.loadResults();
+        }
     },
 
     escapeHtml(text) {

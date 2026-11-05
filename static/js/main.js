@@ -18,4 +18,5 @@ document.addEventListener('DOMContentLoaded', () => {
     GmailCleaner.Auth.checkWebAuthMode();
     GmailCleaner.UI.setupNavigation();
     GmailCleaner.Filters.setup();
+    GmailCleaner.Organize.setupScope();
 });

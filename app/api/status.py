@@ -26,6 +26,9 @@ from app.services import (
     get_label_operation_status,
     get_archive_status,
     get_important_status,
+    get_organize_status,
+    get_organize_results,
+    check_llm,
 )
 
 router = APIRouter(prefix="/api", tags=["Status"])
@@ -243,3 +246,21 @@ async def api_important_status():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get important status",
         ) from e
+
+
+@router.get("/organize-status")
+async def api_organize_status():
+    """Get auto-organize scan/apply status."""
+    return get_organize_status()
+
+
+@router.get("/organize-results")
+async def api_organize_results():
+    """Get the auto-organize preview (labels, counts, samples)."""
+    return get_organize_results()
+
+
+@router.get("/llm-status")
+async def api_llm_status():
+    """Check whether the configured LLM endpoint is reachable."""
+    return check_llm()

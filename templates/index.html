@@ -70,6 +70,12 @@
                         </svg>
                         <span>Mark as Read</span>
                     </a>
+                    <a href="#" class="nav-item" data-view="organize">
+                        <svg viewBox="0 0 24 24" width="20" height="20">
+                            <path fill="currentColor" d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z"/>
+                        </svg>
+                        <span>Auto-Organize</span>
+                    </a>
                 </nav>
 
                 <div class="sidebar-footer">
@@ -327,6 +333,83 @@
                     </div>
                 </div>
 
+                <!-- Auto-Organize View -->
+                <div class="view hidden" id="organizeView">
+                    <div class="content-header">
+                        <h1>Auto-Organize</h1>
+                        <p>Sort bank statements, offers, alerts, investments and job emails into labels. Preview first; nothing changes until you apply.</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Preview</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label>Which emails to look at</label>
+                                <div class="organize-scope">
+                                    <label class="organize-inline">
+                                        <input type="radio" name="organizeScope" value="all" checked>
+                                        All emails
+                                    </label>
+                                    <label class="organize-inline">
+                                        <input type="radio" name="organizeScope" value="range">
+                                        Date range
+                                    </label>
+                                </div>
+                                <div class="organize-range hidden" id="organizeRange">
+                                    <label class="organize-inline">From
+                                        <input type="date" id="organizeFrom" class="filter-input">
+                                    </label>
+                                    <label class="organize-inline">To
+                                        <input type="date" id="organizeTo" class="filter-input">
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-group organize-llm-row">
+                                <label class="organize-inline">
+                                    <input type="checkbox" id="organizeUseLlm" checked>
+                                    Use AI for emails the rules can't place
+                                </label>
+                                <span id="organizeLlmStatus" class="organize-llm-status"></span>
+                            </div>
+                            <button class="btn btn-primary" id="organizeScanBtn" onclick="startOrganizeScan()">Preview</button>
+                        </div>
+                    </div>
+
+                    <div class="card hidden" id="organizeProgressCard">
+                        <div class="card-header">
+                            <h3>Progress</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress-container">
+                                <div class="progress-bar" id="organizeProgressBar"></div>
+                            </div>
+                            <p class="progress-text" id="organizeProgressText">Starting...</p>
+                        </div>
+                    </div>
+
+                    <div class="card hidden" id="organizeResultsCard">
+                        <div class="card-header organize-results-header">
+                            <h3>Proposed labels</h3>
+                            <span>
+                                <button class="btn btn-secondary btn-sm" onclick="GmailCleaner.Organize.toggleAll(true)">All</button>
+                                <button class="btn btn-secondary btn-sm" onclick="GmailCleaner.Organize.toggleAll(false)">None</button>
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div id="organizeResultsList"></div>
+                            <div class="organize-apply-row">
+                                <label class="organize-inline">
+                                    <input type="checkbox" id="organizeArchive">
+                                    Also move them out of the Inbox (like moving into a folder)
+                                </label>
+                                <button class="btn btn-primary" id="organizeApplyBtn" onclick="applyOrganize()">Apply selected labels</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Delete Emails View -->
                 <div class="view hidden" id="deleteView">
                     <div class="content-header">
@@ -468,6 +551,7 @@
     <script src="/static/js/markread.js?v={{ cache_bust }}"></script>
     <script src="/static/js/delete.js?v={{ cache_bust }}"></script>
     <script src="/static/js/labels.js?v={{ cache_bust }}"></script>
+    <script src="/static/js/organize.js?v={{ cache_bust }}"></script>
     <!-- Litepicker Date Range Picker Library -->
     <script src="https://cdn.jsdelivr.net/npm/litepicker@latest/dist/litepicker.js"></script>
 </body>

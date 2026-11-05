@@ -44,6 +44,14 @@ class Settings(BaseSettings):
             return normalized in ("true", "1", "yes", "on")
         return bool(v)
 
+    # LLM (optional) for Auto-Organize: any OpenAI-compatible endpoint.
+    # Ollama: http://localhost:11434/v1 (Docker: http://host.docker.internal:11434/v1)
+    # Groq:   https://api.groq.com/openai/v1  (+ LLM_API_KEY)
+    llm_base_url: str = ""
+    llm_model: str = "qwen2.5:3b"
+    llm_api_key: str = ""
+    llm_timeout: float = 60.0
+
     credentials_file: str = "credentials.json"
     token_file: str = "token.json"
 

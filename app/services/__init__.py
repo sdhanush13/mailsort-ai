@@ -47,4 +47,10 @@ from .gmail import (
     # Mark Important
     mark_important_background,
     get_important_status,
+    # Auto-organize
+    organize_scan_background,
+    organize_apply_background,
+    get_organize_status,
+    get_organize_results,
+    check_llm,
 )

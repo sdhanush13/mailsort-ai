@@ -191,6 +191,29 @@ class MarkImportantRequest(BaseModel):
     )
 
 
+class OrganizeScanRequest(BaseModel):
+    """Request to classify emails into labels (preview only)."""
+
+    limit: int = Field(
+        default=1000, ge=0, le=50000, description="Max emails to scan (0 = all)"
+    )
+    filters: Optional[FiltersModel] = None
+    use_llm: bool = Field(
+        default=True, description="Use the configured LLM for emails rules can't place"
+    )
+
+
+class OrganizeApplyRequest(BaseModel):
+    """Request to apply the previewed plan."""
+
+    labels: Optional[list[str]] = Field(
+        default=None, description="Labels to apply (default: all in the preview)"
+    )
+    archive: bool = Field(
+        default=False, description="Also remove the emails from the Inbox"
+    )
+
+
 # ----- Response Models -----
 
 

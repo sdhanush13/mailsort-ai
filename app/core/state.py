@@ -102,6 +102,32 @@ class AppState:
             "current_sender": 0,
         }
 
+        # Auto-organize state: plan maps label name -> message ids (preview, not yet applied)
+        self.organize_plan: dict[str, list[str]] = {}
+        self.organize_results: list = []
+        self.organize_status: dict = {}
+        self.reset_organize()
+
+    def reset_organize(self):
+        """Reset auto-organize state (plan, preview results and status)."""
+        self.organize_plan = {}
+        self.organize_results = []
+        self.organize_status = {
+            "progress": 0,
+            "message": "Ready",
+            "done": False,
+            "running": False,
+            "error": None,
+            "scanned": 0,
+            "planned": 0,
+            "skipped": 0,
+            "unlabeled": 0,
+            "kept": 0,
+            "applied": 0,
+            "llm_used": False,
+            "llm_error": None,
+        }
+
     def reset_scan(self):
         """Reset scan state."""
         self.scan_results = []
