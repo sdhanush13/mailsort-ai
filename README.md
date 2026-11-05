@@ -11,6 +11,8 @@
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License">
 </p>
 
+> **MailSort AI is the AI version of [Gmail Cleaner](https://github.com/Gururagavendra/gmail-cleaner) by [Gururagavendra](https://github.com/Gururagavendra).** It keeps all of the original cleanup tools and adds **Auto-Organize**, which uses rules plus a local AI model to file your mail into labels.
+
 **MailSort AI** sorts your Gmail into tidy labels. Bank statements are filed per bank and account type, offers and alerts get their own labels, real job applications are kept apart from job-board spam, and promotions are queued up for deletion. It runs on your own machine with your own Google credentials, and you preview every change before anything is applied.
 
 ## How it sorts
@@ -35,6 +37,35 @@ Important mail is **never touched**: security alerts, OTPs, password resets, ord
 2. **AI (optional)** looks at only what the rules can't place: sender, subject and a short snippet. It runs on a local [Ollama](https://ollama.com) model, so nothing leaves your machine. If it isn't sure, it leaves the email alone.
 3. **Preview** shows the count per label, the top senders and sample emails, each tagged *rule* or *AI*. Untick any label you don't want.
 4. **Apply** creates the labels in Gmail and adds them. You can also choose to move the emails out of your Inbox.
+
+### Examples
+
+These are real outputs from the rules engine:
+
+| From | Subject | Result | Why |
+|------|---------|--------|-----|
+| `credit_cards@icicibank.com` | Your ICICI Bank Credit Card Statement for October 2026 | `Banks/ICICI/Credit Card` | ICICI domain, "statement" and "credit card" |
+| `estatement@aubank.in` | AU Bank Savings Account e-Statement - Oct 2026 | `Banks/AU/Savings` | AU domain and "e-statement", no card mentioned |
+| `statements@getonecard.app` | Your OneCard statement is ready | `Banks/OneCard/Credit Card` | OneCard only issues cards |
+| `alerts@hdfcbank.net` | Rs.2,450.00 debited from your account | `Banks/Alerts` | Bank domain and "debited" |
+| `billreminder@kiwiclub.co.in` | Your bill is due on 12 Nov | `Banks/Alerts` | Known bill-reminder sender |
+| `offers@axisbank.com` | You're pre-approved for a personal loan of Rs 5 lakh | `Banks/Offers` | Bank mail that isn't a statement or alert |
+| `ecas@cdslstatement.com` | CDSL Consolidated Account Statement (CAS) for October | `Investments/Statements` | Depository domain and "statement" |
+| `no-reply@myworkday.com` | Thank you for applying to Senior Data Engineer | `Jobs/Applications` | Sent from an applicant tracking system (Workday) |
+| `info@naukri.com` | 25 new jobs matching your profile | `Jobs/Alerts` | Job board, not a real application |
+| `jobs-noreply@linkedin.com` | Data Engineer jobs in Bengaluru | `Jobs/Alerts` | LinkedIn job recommendations |
+| `news@shop.example.com` | Flat 50% off - last chance! | `To Delete` | Promotions tab, unsubscribe link and sale wording |
+| `no-reply@accounts.google.com` | Security alert: new sign-in on Windows | *left alone* | Security mail is always kept |
+| `auto-confirm@amazon.in` | Your Amazon.in order #403-1234567 has shipped | *left alone* | Orders and deliveries are always kept |
+
+When no rule matches, the **AI** reads the sender, subject and a short snippet, and picks a category or answers *other*. For example:
+
+- A loan offer from a small finance company the rules don't know → `Banks/Offers`
+- A "Your card payment of Rs 1,200 was successful" mail from a fintech app → `Banks/Alerts`
+- A webinar invite from an unknown SaaS newsletter → `To Delete`
+- A personal email from a friend → *other* (left alone)
+
+Job labels from the AI are accepted only when the email actually mentions jobs, interviews, hiring or an application. This stops the AI from filing random mail under Jobs.
 
 Emails that are already sorted are skipped on later runs, so running it again only processes new mail. You can scan **all mail** or a **date range**.
 
@@ -156,7 +187,7 @@ The sorting code lives in `app/services/gmail/`:
 
 ## Credits
 
-MailSort AI is built on [Gmail Cleaner](https://github.com/Gururagavendra/gmail-cleaner) by [Gururagavendra](https://github.com/Gururagavendra), released under the MIT License. The original unsubscribe, delete and cleanup features are their work.
+MailSort AI is the AI version of [Gmail Cleaner](https://github.com/Gururagavendra/gmail-cleaner) by [Gururagavendra](https://github.com/Gururagavendra), released under the MIT License. The original unsubscribe, delete and cleanup features are their work.
 
 ## License
 
