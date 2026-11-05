@@ -15,6 +15,12 @@
 
 **MailSort AI** sorts your Gmail into tidy labels. Bank statements are filed per bank and account type, offers and alerts get their own labels, real job applications are kept apart from job-board spam, and promotions are queued up for deletion. It runs on your own machine with your own Google credentials, and you preview every change before anything is applied.
 
+<p align="center">
+  <img src="media/auto-organize.png" alt="Auto-Organize preview listing proposed labels with email counts, top senders and sample emails tagged rule or AI" width="900">
+  <br>
+  <sub>The Auto-Organize preview, shown with demo data</sub>
+</p>
+
 ## How it sorts
 
 | Label | What goes there |
