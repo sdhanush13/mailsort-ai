@@ -1,11 +1,11 @@
 services:
   gmail-cleaner:
-    # Option 1: Multi-arch image: works natively on both AMD64 and ARM64 (Apple Silicon)
-    image: ghcr.io/gururagavendra/gmail-cleaner:latest
-    pull_policy: always
-
-    # Option 2: Build locally (uncomment below, comment out image above)
-    # build: .
+    # Built from this repo (includes Auto-Organize)
+    build: .
+    image: mailsort-ai:local
+    # Lets the container reach Ollama running on your machine
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     ports:
       - "8766:8766"  # Web UI
@@ -27,6 +27,12 @@ services:
           create_host_path: true
     environment:
       - WEB_AUTH=true
+
+      # Optional AI for emails the rules cannot sort (any OpenAI-compatible API).
+      # Local Ollama: install it, run `ollama pull qwen2.5:3b`, then uncomment:
+      # - LLM_BASE_URL=http://host.docker.internal:11434/v1
+      # - LLM_MODEL=qwen2.5:3b
+      # - LLM_API_KEY=   # only needed for hosted APIs such as Groq
 
       # Uncomment and set OAUTH_HOST if accessing via custom domain or server IP
       # - OAUTH_HOST=gmail.example.com
