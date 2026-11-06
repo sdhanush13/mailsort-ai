@@ -121,6 +121,7 @@ class AppState:
             "scanned": 0,
             "planned": 0,
             "skipped": 0,
+            "remembered": 0,
             "unlabeled": 0,
             "kept": 0,
             "applied": 0,

@@ -58,15 +58,21 @@ def _execute_with_retry(request, attempts: int = 5):
 
 
 def _list_message_ids(
-    service, query: str, limit: int, exclude: Optional[set[str]] = None
-) -> tuple[list[str], int]:
-    """List ids matching `query`, leaving out `exclude`. Returns (ids, excluded_count).
+    service,
+    query: str,
+    limit: int,
+    exclude: Optional[set[str]] = None,
+    left_alone: Optional[set[str]] = None,
+) -> tuple[list[str], int, int]:
+    """List ids matching `query`, leaving out already organized and remembered left-alone ids.
 
-    `limit` counts only ids that are not excluded (<= 0 means no limit).
+    Returns (ids, organized_count, left_alone_count). `limit` counts only ids that
+    are returned (<= 0 means no limit).
     """
     exclude = exclude or set()
+    left_alone = left_alone or set()
     ids: list[str] = []
-    excluded = 0
+    organized = remembered = 0
     page_token = None
     while limit <= 0 or len(ids) < limit:
         params = {"userId": "me", "q": query, "maxResults": 500}
@@ -75,16 +81,19 @@ def _list_message_ids(
         result = _execute_with_retry(service.users().messages().list(**params))
         for m in result.get("messages", []):
             if m["id"] in exclude:
-                excluded += 1
+                organized += 1
+            elif m["id"] in left_alone:
+                remembered += 1
             elif limit <= 0 or len(ids) < limit:
                 ids.append(m["id"])
         state.organize_status["message"] = (
-            f"Listing emails... {len(ids):,} to check, {excluded:,} already organized"
+            f"Listing emails... {len(ids):,} to check, {organized:,} already organized"
+            + (f", {remembered:,} left alone before" if remembered else "")
         )
         page_token = result.get("nextPageToken")
         if not page_token:
             break
-    return ids, excluded
+    return ids, organized, remembered
 
 
 def _list_labelled_ids(service, label_ids: list[str]) -> set[str]:
@@ -124,15 +133,41 @@ def _load_ai_memory() -> dict[str, str]:
         return {}
 
 
-def _save_ai_memory(memory: dict[str, str]) -> None:
-    path = _ai_memory_path()
+def _write_json(path: str, data) -> None:
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(memory, f)
+            json.dump(data, f)
         os.replace(tmp, path)
     except OSError:
-        logger.warning("Could not save AI memory to %s", path, exc_info=True)
+        logger.warning("Could not save %s", path, exc_info=True)
+
+
+def _save_ai_memory(memory: dict[str, str]) -> None:
+    _write_json(_ai_memory_path(), memory)
+
+
+# Emails a scan decided to leave alone (protected mail, or the AI said "other").
+# They get no label, so without this list every scan would read them again.
+# Re-checking them (e.g. after a rule update) is opt-in per scan.
+LEFT_ALONE_FILE = "organize_left_alone.json"
+
+
+def _left_alone_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(settings.token_file)), LEFT_ALONE_FILE)
+
+
+def _load_left_alone() -> set[str]:
+    try:
+        with open(_left_alone_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(x) for x in data} if isinstance(data, list) else set()
+    except (OSError, ValueError):
+        return set()
+
+
+def _save_left_alone(ids: set[str]) -> None:
+    _write_json(_left_alone_path(), sorted(ids))
 
 
 def _fetch_metadata(service, ids: list[str], on_progress) -> list[dict]:
@@ -221,8 +256,16 @@ def _label_map(service) -> dict[str, str]:
     return {lbl["name"]: lbl["id"] for lbl in labels}
 
 
-def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, use_llm: bool = True) -> None:
-    """Classify emails and store a preview plan in state (no changes to Gmail)."""
+def organize_scan_background(
+    limit: int = 1000,
+    filters: Optional[dict] = None,
+    use_llm: bool = True,
+    recheck_left_alone: bool = False,
+) -> None:
+    """Classify emails and store a preview plan in state (no changes to Gmail).
+
+    Emails left alone by earlier scans are skipped unless `recheck_left_alone` is set.
+    """
     state.reset_organize()
     status = state.organize_status
     status["running"] = True
@@ -240,14 +283,19 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
         # Leave out already organized mail before reading anything (listing ids is cheap,
         # reading each email's details is the slow, quota-heavy part).
         already_organized = _list_labelled_ids(service, sorted(managed_ids))
+        left_alone = _load_left_alone()
         query = " ".join(p for p in (build_gmail_query(filters), BASE_EXCLUDE) if p)
-        ids, skipped_at_list = _list_message_ids(service, query, limit, already_organized)
+        ids, skipped_at_list, remembered = _list_message_ids(
+            service, query, limit, already_organized, None if recheck_left_alone else left_alone
+        )
         if not ids:
             status.update(
                 skipped=skipped_at_list,
+                remembered=remembered,
                 message=(
-                    f"Nothing new to sort: all {skipped_at_list:,} emails are already organized."
-                    if skipped_at_list
+                    f"Nothing new to sort: {skipped_at_list:,} emails already organized, "
+                    f"{remembered:,} left alone in earlier runs."
+                    if skipped_at_list or remembered
                     else "No emails found"
                 ),
                 progress=100,
@@ -267,6 +315,7 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
         unresolved: list[tuple[str, EmailMeta]] = []
         skipped = skipped_at_list
         kept = 0
+        newly_left_alone: set[str] = set()
 
         def assign(label: str, mid: str, email: EmailMeta, source: str) -> None:
             plan.setdefault(label, []).append(mid)
@@ -287,6 +336,7 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
             label = classify_by_rules(email)
             if label == KEEP:
                 kept += 1
+                newly_left_alone.add(message["id"])
             elif label:
                 assign(label, message["id"], email, "rule")
             else:
@@ -329,11 +379,21 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
                 if label:
                     assign(label, mid, email, "llm")
                 else:
+                    # Only a real AI "leave alone" answer is remembered; errors and
+                    # rules-only runs are not, so a later AI run still looks at them.
+                    newly_left_alone.add(mid)
                     unlabeled += 1
             if new_answers:
                 _save_ai_memory(memory)
         else:
             unlabeled = len(unresolved)
+
+        # Remember what this scan left alone; drop anything it now wants to label
+        # (a re-check after a rule update may have found a label for it).
+        planned_ids = {mid for mids in plan.values() for mid in mids}
+        updated_left_alone = (left_alone - planned_ids) | newly_left_alone
+        if updated_left_alone != left_alone:
+            _save_left_alone(updated_left_alone)
 
         state.organize_plan = plan
         state.organize_results = sorted(
@@ -358,6 +418,7 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
             scanned=len(messages),
             planned=total_planned,
             skipped=skipped,
+            remembered=remembered,
             unlabeled=unlabeled + kept,
             kept=kept,
             llm_used=llm_used,
@@ -365,7 +426,8 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
             message=(
                 f"Preview ready: {total_planned:,} of {len(messages):,} emails sorted into "
                 f"{len(plan)} labels. {unlabeled + kept:,} left alone ({kept:,} protected: orders, security, bookings), "
-                f"{skipped:,} already organized."
+                f"{skipped:,} already organized"
+                + (f", {remembered:,} skipped as left alone in earlier runs." if remembered else ".")
             ),
         )
     except Exception as e:

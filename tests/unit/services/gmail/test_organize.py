@@ -271,26 +271,89 @@ class TestScanAndApply:
         state.reset_organize()
 
     def _run_scan(self, messages, labels=(), llm_label=None, use_llm=True, llm_enabled=True,
-                  memory=None, skipped_at_list=0):
+                  memory=None, skipped_at_list=0, left_alone=None, recheck=False):
         service = MagicMock()
         self.saved_memory = None
+        self.saved_left_alone = None
 
         def save(mem):
             self.saved_memory = dict(mem)
 
+        def save_left_alone(ids):
+            self.saved_left_alone = set(ids)
+
+        def list_ids(_service, _query, _limit, _exclude, skip_alone):
+            skip_alone = skip_alone or set()
+            fresh = [m for m in messages if m["id"] not in skip_alone]
+            self.fetched_messages = fresh
+            return [m["id"] for m in fresh], skipped_at_list, len(messages) - len(fresh)
+
         with patch.object(organize, "get_gmail_service", return_value=(service, None)), \
              patch.object(organize, "_label_map", return_value=dict(labels)), \
              patch.object(organize, "_list_labelled_ids", return_value=set()), \
-             patch.object(organize, "_list_message_ids",
-                          return_value=([m["id"] for m in messages], skipped_at_list)), \
-             patch.object(organize, "_fetch_metadata", return_value=messages) as fetch, \
+             patch.object(organize, "_list_message_ids", side_effect=list_ids), \
+             patch.object(organize, "_fetch_metadata",
+                          side_effect=lambda *_a: self.fetched_messages) as fetch, \
              patch.object(organize, "_load_ai_memory", return_value=dict(memory or {})), \
              patch.object(organize, "_save_ai_memory", side_effect=save), \
+             patch.object(organize, "_load_left_alone", return_value=set(left_alone or ())), \
+             patch.object(organize, "_save_left_alone", side_effect=save_left_alone), \
              patch.object(organize.llm, "is_enabled", return_value=llm_enabled), \
              patch.object(organize.llm, "classify_with_llm", return_value=(llm_label, None)) as clf:
-            organize.organize_scan_background(100, None, use_llm)
+            organize.organize_scan_background(100, None, use_llm, recheck)
         self.fetch = fetch
         return clf
+
+    def test_left_alone_emails_are_remembered(self):
+        msgs = [
+            _message("1", "no-reply@accounts.google.com", "Security alert"),      # protected
+            _message("2", "friend@gmail.com", "Dinner?", ["CATEGORY_PERSONAL"]),  # AI: other
+            _message("3", "noreply@glassdoor.com", "5 more jobs for you"),         # rule label
+        ]
+        self._run_scan(msgs, llm_label=None)
+        assert self.saved_left_alone == {"1", "2"}
+
+    def test_remembered_emails_are_not_read_again(self):
+        msgs = [
+            _message("1", "no-reply@accounts.google.com", "Security alert"),
+            _message("3", "noreply@glassdoor.com", "5 more jobs for you"),
+        ]
+        clf = self._run_scan(msgs, left_alone={"1"})
+        assert [m["id"] for m in self.fetched_messages] == ["3"]
+        assert state.organize_status["remembered"] == 1
+        assert "left alone in earlier runs" in state.organize_status["message"]
+        assert clf.call_count == 0
+
+    def test_recheck_reads_them_and_forgets_ones_that_now_get_a_label(self):
+        # "1" was left alone before, but a rule update now places it
+        msgs = [_message("1", "connect@easemytrip.com", "2 Days Left!!!")]
+        self._run_scan(msgs, left_alone={"1", "9"}, recheck=True)
+        assert [m["id"] for m in self.fetched_messages] == ["1"]
+        assert state.organize_plan == {LABEL_TO_DELETE: ["1"]}
+        assert self.saved_left_alone == {"9"}
+
+    def test_rules_only_run_does_not_remember_unclear_emails(self):
+        msgs = [_message("2", "friend@gmail.com", "Dinner?", ["CATEGORY_PERSONAL"])]
+        self._run_scan(msgs, use_llm=False)
+        assert self.saved_left_alone is None  # nothing new to remember
+
+    def test_ai_errors_are_not_remembered(self):
+        msgs = [_message("2", "friend@gmail.com", "Dinner?", ["CATEGORY_PERSONAL"])]
+        with patch.object(organize.llm, "classify_with_llm", return_value=(None, "timeout")):
+            service = MagicMock()
+            saved = []
+            with patch.object(organize, "get_gmail_service", return_value=(service, None)), \
+                 patch.object(organize, "_label_map", return_value={}), \
+                 patch.object(organize, "_list_labelled_ids", return_value=set()), \
+                 patch.object(organize, "_list_message_ids", return_value=(["2"], 0, 0)), \
+                 patch.object(organize, "_fetch_metadata", return_value=msgs), \
+                 patch.object(organize, "_load_ai_memory", return_value={}), \
+                 patch.object(organize, "_save_ai_memory"), \
+                 patch.object(organize, "_load_left_alone", return_value=set()), \
+                 patch.object(organize, "_save_left_alone", side_effect=saved.append), \
+                 patch.object(organize.llm, "is_enabled", return_value=True):
+                organize.organize_scan_background(100, None, True)
+        assert saved == []
 
     def test_ai_answers_are_remembered_across_runs(self):
         msgs = [
@@ -393,16 +456,18 @@ class TestListing:
             {"messages": [{"id": "1"}, {"id": "2"}], "nextPageToken": "p2"},
             {"messages": [{"id": "3"}, {"id": "4"}]},
         ])
-        ids, excluded = organize._list_message_ids(service, "q", 0, exclude={"2", "3"})
-        assert ids == ["1", "4"] and excluded == 2
+        ids, excluded, remembered = organize._list_message_ids(
+            service, "q", 0, exclude={"2"}, left_alone={"3"}
+        )
+        assert ids == ["1", "4"] and excluded == 1 and remembered == 1
 
     def test_limit_counts_only_new_ids(self):
         service, _ = _paged_list_service([
             {"messages": [{"id": "1"}, {"id": "2"}, {"id": "3"}], "nextPageToken": "p2"},
             {"messages": [{"id": "4"}, {"id": "5"}]},
         ])
-        ids, excluded = organize._list_message_ids(service, "q", 2, exclude={"1", "2"})
-        assert ids == ["3", "4"] and excluded == 2
+        ids, excluded, remembered = organize._list_message_ids(service, "q", 2, exclude={"1", "2"})
+        assert ids == ["3", "4"] and excluded == 2 and remembered == 0
 
     def test_labelled_ids_union_across_labels_and_pages(self):
         service, calls = _paged_list_service([
@@ -470,6 +535,12 @@ class TestAiMemoryFile:
         with patch.object(organize, "_ai_memory_path", return_value=str(path)):
             assert organize._load_ai_memory() == {}
 
+    def test_left_alone_round_trip(self, tmp_path):
+        with patch.object(organize, "_left_alone_path", return_value=str(tmp_path / "l.json")):
+            assert organize._load_left_alone() == set()
+            organize._save_left_alone({"b", "a"})
+            assert organize._load_left_alone() == {"a", "b"}
+
 
 class TestOrganizeApi:
     def test_scan_starts(self, client):
@@ -477,6 +548,12 @@ class TestOrganizeApi:
         with patch("app.api.actions.organize_scan_background"):
             res = client.post("/api/organize-scan", json={"limit": 500, "use_llm": False})
         assert res.status_code == 200 and res.json()["status"] == "started"
+
+    def test_scan_passes_recheck_flag(self, client):
+        state.reset_organize()
+        with patch("app.api.actions.organize_scan_background") as scan:
+            client.post("/api/organize-scan", json={"limit": 0, "recheck_left_alone": True})
+        assert scan.call_args.args[-1] is True
 
     def test_scan_rejects_negative_limit(self, client):
         assert client.post("/api/organize-scan", json={"limit": -1}).status_code == 422

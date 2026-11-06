@@ -269,7 +269,11 @@ async def api_organize_scan(
         request.filters.model_dump(exclude_none=True) if request.filters else None
     )
     background_tasks.add_task(
-        organize_scan_background, request.limit, filters_dict, request.use_llm
+        organize_scan_background,
+        request.limit,
+        filters_dict,
+        request.use_llm,
+        request.recheck_left_alone,
     )
     return {"status": "started"}
 

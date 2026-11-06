@@ -69,6 +69,7 @@ GmailCleaner.Organize = {
 
     async startScan() {
         const useLlm = document.getElementById('organizeUseLlm').checked;
+        const recheck = document.getElementById('organizeRecheck').checked;
         let filters = null;
         if (this.scope() === 'range') {
             const range = this.rangeFilters();
@@ -85,7 +86,7 @@ GmailCleaner.Organize = {
             const res = await fetch('/api/organize-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ limit: 0, use_llm: useLlm, filters })
+                body: JSON.stringify({ limit: 0, use_llm: useLlm, recheck_left_alone: recheck, filters })
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));

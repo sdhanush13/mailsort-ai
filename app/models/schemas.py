@@ -201,6 +201,10 @@ class OrganizeScanRequest(BaseModel):
     use_llm: bool = Field(
         default=True, description="Use the configured LLM for emails rules can't place"
     )
+    recheck_left_alone: bool = Field(
+        default=False,
+        description="Also re-check emails earlier scans left alone (e.g. after a rule update)",
+    )
 
 
 class OrganizeApplyRequest(BaseModel):
