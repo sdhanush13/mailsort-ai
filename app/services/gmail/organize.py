@@ -27,10 +27,13 @@ from app.services.gmail.organize_rules import KEEP, EmailMeta, classify_by_rules
 
 logger = logging.getLogger(__name__)
 
-# Gmail allows 15,000 quota units/user/minute; messages.get costs 5.
-# 100 gets per batch = 500 units -> pause ~2.1s between batches to stay under 250 units/s.
-FETCH_BATCH = 100
-FETCH_PAUSE_SECONDS = 2.1
+# Gmail allows 250 quota units/user/second; messages.get costs 5. Google advises
+# batches of at most 50 (larger ones trip "too many concurrent requests").
+# 50 gets = 250 units -> one batch per ~1s. The interval adapts: it backs off when
+# Gmail rate-limits and creeps back down when batches go through cleanly.
+FETCH_BATCH = 50
+FETCH_PAUSE_SECONDS = 1.4  # ~70% of the limit leaves headroom for other calls
+FETCH_PAUSE_MAX_SECONDS = 8.0
 MODIFY_BATCH = 1000  # batchModify limit
 LLM_MAX_CONSECUTIVE_ERRORS = 3
 BASE_EXCLUDE = "-in:sent -in:chats -in:spam -in:trash -in:drafts"
@@ -49,7 +52,9 @@ def _execute_with_retry(request, attempts: int = 5):
         except Exception as e:
             if not _is_rate_limited(e) or attempt == attempts - 1:
                 raise
-            time.sleep(min(60, 5 * 2**attempt))
+            wait = min(60, 5 * 2**attempt)
+            logger.warning("Gmail rate limit on request (attempt %d), waiting %ds: %s", attempt + 1, wait, str(e)[:200])
+            time.sleep(wait)
 
 
 def _list_message_ids(
@@ -136,16 +141,21 @@ def _fetch_metadata(service, ids: list[str], on_progress) -> list[dict]:
     pending = list(ids)
     rounds = 0
     done = 0
+    pause = FETCH_PAUSE_SECONDS
     while pending and rounds < 4:
         retry: list[str] = []
         for start in range(0, len(pending), FETCH_BATCH):
             chunk = pending[start : start + FETCH_BATCH]
+            started = time.monotonic()
+            limited_before = len(retry)
 
             def callback(request_id, response, exception):
                 nonlocal done
                 if exception is not None:
                     if _is_rate_limited(exception):
                         retry.append(request_id)
+                    else:
+                        logger.warning("Could not read message %s: %s", request_id, exception)
                     return
                 messages.append(response)
                 done += 1
@@ -162,12 +172,22 @@ def _fetch_metadata(service, ids: list[str], on_progress) -> list[dict]:
                     request_id=mid,
                 )
             _execute_with_retry(batch)
+            if len(retry) > limited_before:
+                pause = min(FETCH_PAUSE_MAX_SECONDS, pause * 1.5)
+                logger.warning(
+                    "Gmail rate-limited %d of %d reads; next batch in %.1fs",
+                    len(retry) - limited_before, len(chunk), pause,
+                )
+            else:
+                pause = max(FETCH_PAUSE_SECONDS, pause * 0.5)
             on_progress(done, len(ids))
-            time.sleep(FETCH_PAUSE_SECONDS)
+            # Pace from the start of the batch, so the request time counts toward the interval
+            time.sleep(max(0.0, pause - (time.monotonic() - started)))
         pending = retry
         rounds += 1
         if pending:
-            time.sleep(10 * rounds)
+            logger.warning("Retrying %d rate-limited reads (round %d)", len(pending), rounds + 1)
+            time.sleep(5 * rounds)
     return messages
 
 

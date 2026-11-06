@@ -414,6 +414,49 @@ class TestListing:
         assert [c["labelIds"] for c in calls] == [["L1"], ["L1"], ["L2"]]
 
 
+class TestFetchPacing:
+    def _service(self, limited_calls):
+        """Fake batch API: on the call numbers in `limited_calls`, every read is rate-limited."""
+        service = MagicMock()
+        state_ = {"call": 0}
+
+        def new_batch(callback):
+            items = []
+            batch = MagicMock()
+            batch.add.side_effect = lambda req, request_id: items.append(request_id)
+
+            def execute():
+                state_["call"] += 1
+                for mid in items:
+                    if state_["call"] in limited_calls:
+                        callback(mid, None, Exception("429 rateLimitExceeded"))
+                    else:
+                        callback(mid, {"id": mid}, None)
+
+            batch.execute.side_effect = execute
+            return batch
+
+        service.new_batch_http_request.side_effect = new_batch
+        return service
+
+    def test_backs_off_when_rate_limited_and_recovers_everything(self):
+        ids = [str(i) for i in range(organize.FETCH_BATCH * 3)]
+        sleeps = []
+        with patch.object(organize.time, "sleep", side_effect=sleeps.append):
+            msgs = organize._fetch_metadata(self._service({2}), ids, lambda d, t: None)
+        assert sorted(m["id"] for m in msgs) == sorted(ids)
+        # the batch after the rate-limited one waits longer than the normal pace
+        assert max(sleeps) > organize.FETCH_PAUSE_SECONDS
+
+    def test_clean_run_keeps_base_pace(self):
+        ids = [str(i) for i in range(organize.FETCH_BATCH * 3)]
+        sleeps = []
+        with patch.object(organize.time, "sleep", side_effect=sleeps.append):
+            msgs = organize._fetch_metadata(self._service(set()), ids, lambda d, t: None)
+        assert len(msgs) == len(ids)
+        assert all(s <= organize.FETCH_PAUSE_SECONDS for s in sleeps)
+
+
 class TestAiMemoryFile:
     def test_round_trip(self, tmp_path):
         with patch.object(organize, "_ai_memory_path", return_value=str(tmp_path / "m.json")):
