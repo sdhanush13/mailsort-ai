@@ -201,6 +201,12 @@ class TestNoiseAndFallthrough:
     def test_linkedin_social(self):
         assert classify_by_rules(meta("messages-noreply@linkedin.com", "Someone you may know", ["social"])) == LABEL_TO_DELETE
 
+    def test_easemytrip_marketing(self):
+        assert classify_by_rules(meta("connect@easemytrip.com", "2 Days Left!!!", ["updates"])) == LABEL_TO_DELETE
+
+    def test_easemytrip_booking_is_kept(self):
+        assert classify_by_rules(meta("noreply@easemytrip.com", "Booking Confirmed - Trip ID 123", ["updates"])) == KEEP
+
     def test_personal_mail_is_untouched(self):
         assert classify_by_rules(meta("friend@gmail.com", "Dinner tomorrow?", ["personal"])) is None
 
@@ -264,16 +270,52 @@ class TestScanAndApply:
         monkeypatch.setattr(organize.time, "sleep", lambda *_: None)
         state.reset_organize()
 
-    def _run_scan(self, messages, labels=(), llm_label=None, use_llm=True, llm_enabled=True):
+    def _run_scan(self, messages, labels=(), llm_label=None, use_llm=True, llm_enabled=True,
+                  memory=None, skipped_at_list=0):
         service = MagicMock()
+        self.saved_memory = None
+
+        def save(mem):
+            self.saved_memory = dict(mem)
+
         with patch.object(organize, "get_gmail_service", return_value=(service, None)), \
              patch.object(organize, "_label_map", return_value=dict(labels)), \
-             patch.object(organize, "_list_message_ids", return_value=[m["id"] for m in messages]), \
-             patch.object(organize, "_fetch_metadata", return_value=messages), \
+             patch.object(organize, "_list_labelled_ids", return_value=set()), \
+             patch.object(organize, "_list_message_ids",
+                          return_value=([m["id"] for m in messages], skipped_at_list)), \
+             patch.object(organize, "_fetch_metadata", return_value=messages) as fetch, \
+             patch.object(organize, "_load_ai_memory", return_value=dict(memory or {})), \
+             patch.object(organize, "_save_ai_memory", side_effect=save), \
              patch.object(organize.llm, "is_enabled", return_value=llm_enabled), \
              patch.object(organize.llm, "classify_with_llm", return_value=(llm_label, None)) as clf:
             organize.organize_scan_background(100, None, use_llm)
+        self.fetch = fetch
         return clf
+
+    def test_ai_answers_are_remembered_across_runs(self):
+        msgs = [
+            _message("1", "hr@acme.com", "Lunch plans", ["CATEGORY_PERSONAL"]),
+            _message("2", "promo@shop.example", "Hello there", ["CATEGORY_PERSONAL"]),
+        ]
+        clf = self._run_scan(msgs, llm_label=None)
+        assert clf.call_count == 2
+        assert self.saved_memory == {"1": "", "2": ""}
+
+        # Next run: both answers come from memory, the AI is not called again
+        clf = self._run_scan(msgs, llm_label=LABEL_TO_DELETE, memory={"1": "", "2": LABEL_TO_DELETE})
+        assert clf.call_count == 0
+        assert state.organize_plan == {LABEL_TO_DELETE: ["2"]}
+
+    def test_nothing_new_to_sort(self):
+        self._run_scan([], skipped_at_list=500)
+        assert self.fetch.call_count == 0
+        assert state.organize_status["skipped"] == 500
+        assert "already organized" in state.organize_status["message"]
+
+    def test_already_organized_count_includes_list_time_skips(self):
+        msgs = [_message("1", "noreply@glassdoor.com", "5 more jobs for you")]
+        self._run_scan(msgs, skipped_at_list=40)
+        assert state.organize_status["skipped"] == 40
 
     def test_scan_builds_plan_without_modifying(self):
         msgs = [
@@ -327,6 +369,63 @@ class TestScanAndApply:
         assert body == {"ids": ["1", "2"], "addLabelIds": ["L3"], "removeLabelIds": ["INBOX"]}
         assert state.organize_plan == {LABEL_TO_DELETE: ["3"]}  # unapplied label kept
         assert state.organize_status["applied"] == 2
+
+
+def _paged_list_service(pages_by_call):
+    """Fake service whose messages().list(**params).execute() returns pages in order."""
+    service = MagicMock()
+    pages = iter(pages_by_call)
+    calls = []
+
+    def list_(**params):
+        calls.append(params)
+        req = MagicMock()
+        req.execute.return_value = next(pages)
+        return req
+
+    service.users.return_value.messages.return_value.list.side_effect = list_
+    return service, calls
+
+
+class TestListing:
+    def test_excluded_ids_are_skipped_and_counted(self):
+        service, _ = _paged_list_service([
+            {"messages": [{"id": "1"}, {"id": "2"}], "nextPageToken": "p2"},
+            {"messages": [{"id": "3"}, {"id": "4"}]},
+        ])
+        ids, excluded = organize._list_message_ids(service, "q", 0, exclude={"2", "3"})
+        assert ids == ["1", "4"] and excluded == 2
+
+    def test_limit_counts_only_new_ids(self):
+        service, _ = _paged_list_service([
+            {"messages": [{"id": "1"}, {"id": "2"}, {"id": "3"}], "nextPageToken": "p2"},
+            {"messages": [{"id": "4"}, {"id": "5"}]},
+        ])
+        ids, excluded = organize._list_message_ids(service, "q", 2, exclude={"1", "2"})
+        assert ids == ["3", "4"] and excluded == 2
+
+    def test_labelled_ids_union_across_labels_and_pages(self):
+        service, calls = _paged_list_service([
+            {"messages": [{"id": "1"}], "nextPageToken": "p2"},
+            {"messages": [{"id": "2"}]},
+            {"messages": [{"id": "2"}, {"id": "3"}]},
+        ])
+        assert organize._list_labelled_ids(service, ["L1", "L2"]) == {"1", "2", "3"}
+        assert [c["labelIds"] for c in calls] == [["L1"], ["L1"], ["L2"]]
+
+
+class TestAiMemoryFile:
+    def test_round_trip(self, tmp_path):
+        with patch.object(organize, "_ai_memory_path", return_value=str(tmp_path / "m.json")):
+            assert organize._load_ai_memory() == {}
+            organize._save_ai_memory({"a": "", "b": LABEL_TO_DELETE})
+            assert organize._load_ai_memory() == {"a": "", "b": LABEL_TO_DELETE}
+
+    def test_corrupt_file_is_ignored(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text("{not json", encoding="utf-8")
+        with patch.object(organize, "_ai_memory_path", return_value=str(path)):
+            assert organize._load_ai_memory() == {}
 
 
 class TestOrganizeApi:

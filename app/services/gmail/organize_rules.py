@@ -96,6 +96,8 @@ NOISE_SENDERS = [
     "messages-noreply@linkedin.com", "notifications-noreply@linkedin.com",
     "updates-noreply@linkedin.com", "invitations@linkedin.com", "em.linkedin.com",
     "digest.groww.in", "campaigns.upstox.com", "quora.com",
+    # Marketing-only address; bookings come from other easemytrip.com addresses
+    "connect@easemytrip.com",
 ]
 
 # ----- Keep (never labelled, never sent to the LLM) -----

@@ -10,13 +10,16 @@ Sort emails into labels (bank statements, offers, alerts, investments, jobs,
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import time
 from collections import Counter
 from typing import Optional
 
 from app.core import state
+from app.core import settings
 from app.services.auth import get_gmail_service
 from app.services.gmail import llm
 from app.services.gmail.helpers import build_gmail_query, get_sender_info
@@ -49,22 +52,82 @@ def _execute_with_retry(request, attempts: int = 5):
             time.sleep(min(60, 5 * 2**attempt))
 
 
-def _list_message_ids(service, query: str, limit: int) -> list[str]:
+def _list_message_ids(
+    service, query: str, limit: int, exclude: Optional[set[str]] = None
+) -> tuple[list[str], int]:
+    """List ids matching `query`, leaving out `exclude`. Returns (ids, excluded_count).
+
+    `limit` counts only ids that are not excluded (<= 0 means no limit).
+    """
+    exclude = exclude or set()
     ids: list[str] = []
+    excluded = 0
     page_token = None
     while limit <= 0 or len(ids) < limit:
         params = {"userId": "me", "q": query, "maxResults": 500}
-        if limit > 0:
-            params["maxResults"] = min(500, limit - len(ids))
         if page_token:
             params["pageToken"] = page_token
         result = _execute_with_retry(service.users().messages().list(**params))
-        ids.extend(m["id"] for m in result.get("messages", []))
-        state.organize_status["message"] = f"Listing emails... {len(ids):,} found"
+        for m in result.get("messages", []):
+            if m["id"] in exclude:
+                excluded += 1
+            elif limit <= 0 or len(ids) < limit:
+                ids.append(m["id"])
+        state.organize_status["message"] = (
+            f"Listing emails... {len(ids):,} to check, {excluded:,} already organized"
+        )
         page_token = result.get("nextPageToken")
         if not page_token:
             break
-    return ids
+    return ids, excluded
+
+
+def _list_labelled_ids(service, label_ids: list[str]) -> set[str]:
+    """Ids of all messages carrying any of `label_ids` (ids only, no message details)."""
+    found: set[str] = set()
+    for label_id in label_ids:
+        page_token = None
+        while True:
+            params = {"userId": "me", "labelIds": [label_id], "maxResults": 500, "includeSpamTrash": False}
+            if page_token:
+                params["pageToken"] = page_token
+            result = _execute_with_retry(service.users().messages().list(**params))
+            found.update(m["id"] for m in result.get("messages", []))
+            state.organize_status["message"] = f"Finding already organized emails... {len(found):,}"
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+    return found
+
+
+# AI answers are remembered per message id across runs, so emails the AI already
+# looked at (including ones it chose to leave alone) are not sent to it again.
+AI_MEMORY_FILE = "organize_ai_memory.json"
+AI_MEMORY_SAVE_EVERY = 25
+
+
+def _ai_memory_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(settings.token_file)), AI_MEMORY_FILE)
+
+
+def _load_ai_memory() -> dict[str, str]:
+    try:
+        with open(_ai_memory_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_ai_memory(memory: dict[str, str]) -> None:
+    path = _ai_memory_path()
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(memory, f)
+        os.replace(tmp, path)
+    except OSError:
+        logger.warning("Could not save AI memory to %s", path, exc_info=True)
 
 
 def _fetch_metadata(service, ids: list[str], on_progress) -> list[dict]:
@@ -154,10 +217,23 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
         label_ids = _label_map(service)
         managed_ids = {lid for name, lid in label_ids.items() if is_managed_label(name)}
 
+        # Leave out already organized mail before reading anything (listing ids is cheap,
+        # reading each email's details is the slow, quota-heavy part).
+        already_organized = _list_labelled_ids(service, sorted(managed_ids))
         query = " ".join(p for p in (build_gmail_query(filters), BASE_EXCLUDE) if p)
-        ids = _list_message_ids(service, query, limit)
+        ids, skipped_at_list = _list_message_ids(service, query, limit, already_organized)
         if not ids:
-            status.update(message="No emails found", progress=100, done=True, running=False)
+            status.update(
+                skipped=skipped_at_list,
+                message=(
+                    f"Nothing new to sort: all {skipped_at_list:,} emails are already organized."
+                    if skipped_at_list
+                    else "No emails found"
+                ),
+                progress=100,
+                done=True,
+                running=False,
+            )
             return
 
         def on_fetch(done: int, total: int) -> None:
@@ -169,7 +245,7 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
         plan: dict[str, list[str]] = {}
         details: dict[str, dict] = {}
         unresolved: list[tuple[str, EmailMeta]] = []
-        skipped = 0
+        skipped = skipped_at_list
         kept = 0
 
         def assign(label: str, mid: str, email: EmailMeta, source: str) -> None:
@@ -200,13 +276,18 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
         llm_error = None
         unlabeled = 0
         if llm_used and unresolved:
+            memory = _load_ai_memory()
+            new_answers = 0
             cache: dict[tuple[str, str], Optional[str]] = {}
             consecutive_errors = 0
             for i, (mid, email) in enumerate(unresolved, 1):
                 status["progress"] = 50 + int(i / len(unresolved) * 48)
                 status["message"] = f"AI sorting the unclear ones... {i:,}/{len(unresolved):,}"
                 key = _llm_cache_key(email)
-                if key in cache:
+                if mid in memory:
+                    # "" means the AI already chose to leave this email alone
+                    label = memory[mid] if memory[mid] in llm.CATEGORIES.values() else None
+                elif key in cache:
                     label = cache[key]
                 else:
                     label, err = llm.classify_with_llm(email)
@@ -220,10 +301,17 @@ def organize_scan_background(limit: int = 1000, filters: Optional[dict] = None, 
                         continue
                     consecutive_errors = 0
                     cache[key] = label
+                if mid not in memory:
+                    memory[mid] = label or ""
+                    new_answers += 1
+                    if new_answers % AI_MEMORY_SAVE_EVERY == 0:
+                        _save_ai_memory(memory)
                 if label:
                     assign(label, mid, email, "llm")
                 else:
                     unlabeled += 1
+            if new_answers:
+                _save_ai_memory(memory)
         else:
             unlabeled = len(unresolved)
 
