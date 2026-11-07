@@ -11,11 +11,21 @@ from app.services.gmail import llm, organize
 from app.services.gmail.organize_rules import (
     LABEL_BANK_ALERTS,
     LABEL_BANK_OFFERS,
+    LABEL_CRYPTO,
+    LABEL_FOOD,
+    LABEL_GOVERNMENT,
     LABEL_INVEST_STATEMENTS,
     LABEL_JOB_ALERTS,
     LABEL_JOB_APPLICATIONS,
+    LABEL_PAYMENTS,
+    LABEL_PROPERTY,
+    LABEL_RIDES,
+    LABEL_SECURITY,
+    LABEL_SHOPPING,
     LABEL_TO_DELETE,
+    LABEL_TRAVEL,
     KEEP,
+    RULES_VERSION,
     EmailMeta,
     classify_by_rules,
     is_managed_label,
@@ -128,22 +138,16 @@ class TestKeep:
     @pytest.mark.parametrize(
         "sender,subject",
         [
-            ("no-reply@accounts.google.com", "Security alert for srohan1999@gmail.com"),
-            ("noreply@github.com", "[ACTION REQUIRED] Your GitHub account will soon require 2FA"),
-            ("support@railway.app", "Urgent: Railway Security Disclosure - Rotate Credentials"),
-            ("noreply@supabase.com", "Action required: security vulnerabilities detected in your projects"),
-            ("security@mail.instagram.com", "New login to Instagram from Instagram on GM1911"),
-            ("order-update@amazon.in", "Delivered: Seethalakshmi's Pickles..."),
-            ("return@amazon.in", "Your refund for DEBIRE Steel-Plastic Kitchen Gas"),
-            ("contactus@viaterragear.com", "Shipping update for order #456553"),
-            ("ticketadmin@irctc.co.in", "Booking Confirmation on IRCTC, Train: 12295"),
-            ("noreply.irctc@royalsundaram.in", "Your Travel Policy is issued for PNR No.4659919783"),
             ("dhanush@micglobal.com", "Fw: Payslip for September 2026"),
-            ("donotreply@transactions.upstox.com", "OTP to login"),
+            ("noreply@github.com", "[org/repo] Pull request merged"),
+            ("care@royalsundaram.in", "Your Health Policy is issued"),
         ],
     )
     def test_protected(self, sender, subject):
         assert classify_by_rules(meta(sender, subject, ["updates"], unsub=True)) == KEEP
+
+    def test_forwarded_mail_from_a_person_is_not_a_receipt(self):
+        assert classify_by_rules(meta("friend@gmail.com", "Fwd: invoice for the trip", ["personal"])) == KEEP
 
     def test_bank_alerts_are_not_swallowed_by_keep(self):
         email = meta("customernotification@icici.bank.in", "Grid Card Authentication (GCA) attempt has failed", ["personal"])
@@ -204,8 +208,8 @@ class TestNoiseAndFallthrough:
     def test_easemytrip_marketing(self):
         assert classify_by_rules(meta("connect@easemytrip.com", "2 Days Left!!!", ["updates"])) == LABEL_TO_DELETE
 
-    def test_easemytrip_booking_is_kept(self):
-        assert classify_by_rules(meta("noreply@easemytrip.com", "Booking Confirmed - Trip ID 123", ["updates"])) == KEEP
+    def test_easemytrip_booking_is_travel(self):
+        assert classify_by_rules(meta("noreply@easemytrip.com", "Booking Confirmed - Trip ID 123", ["updates"])) == LABEL_TRAVEL
 
     def test_personal_mail_is_untouched(self):
         assert classify_by_rules(meta("friend@gmail.com", "Dinner tomorrow?", ["personal"])) is None
@@ -213,8 +217,64 @@ class TestNoiseAndFallthrough:
     def test_managed_labels(self):
         assert is_managed_label("Banks/ICICI/Savings")
         assert is_managed_label("To Delete")
+        assert is_managed_label("Security") and is_managed_label("Shopping/Orders")
         assert not is_managed_label("Banks")
         assert not is_managed_label("Receipts")
+
+
+class TestEverydayCategories:
+    @pytest.mark.parametrize(
+        "sender,subject,cats,expected",
+        [
+            ("no-reply@accounts.google.com", "Security alert for srohan1999@gmail.com", [], LABEL_SECURITY),
+            ("noreply@github.com", "[ACTION REQUIRED] Your GitHub account will soon require 2FA", [], LABEL_SECURITY),
+            ("support@railway.app", "Urgent: Railway Security Disclosure - Rotate Credentials", [], LABEL_SECURITY),
+            ("noreply@supabase.com", "Action required: security vulnerabilities detected in your projects", [], LABEL_SECURITY),
+            ("security@mail.instagram.com", "New login to Instagram from Instagram on GM1911", [], LABEL_SECURITY),
+            ("donotreply@transactions.upstox.com", "OTP to login", [], LABEL_SECURITY),
+            ("store+1@t.shopifyemail.com", "266447 is your login code", [], LABEL_SECURITY),
+            ("ticketadmin@irctc.co.in", "One Time Password (OTP) for your LOGIN on IRCTC", [], LABEL_SECURITY),
+            ("nps-alerts@proteantech.in", "Protean CRA - Password Change Alert", [], LABEL_SECURITY),
+            ("order-update@amazon.in", "Delivered: Seethalakshmi's Pickles...", [], LABEL_SHOPPING),
+            ("auto-confirm@amazon.in", "Your Amazon.in order #405-1057010-5368313 of 3 items", [], LABEL_SHOPPING),
+            ("return@amazon.in", "Your refund for DEBIRE Steel-Plastic Kitchen Gas", [], LABEL_SHOPPING),
+            ("contactus@viaterragear.com", "Shipping update for order #456553", [], LABEL_SHOPPING),
+            ("no-reply@snitch.co.in", "Your order 5697144 is out for delivery", [], LABEL_SHOPPING),
+            ("ticketadmin@irctc.co.in", "Booking Confirmation on IRCTC, Train: 12295", [], LABEL_TRAVEL),
+            ("noreply.irctc@royalsundaram.in", "Your Travel Policy is issued for PNR No.4659919783", [], LABEL_TRAVEL),
+            ("no-reply@agoda.com", "Booking confirmation with Agoda - Booking ID: 1973211384", [], LABEL_TRAVEL),
+            ("express@airbnb.com", "RE: Reservation at SREEJA BOUTIQUE HOME for 23 February", [], LABEL_TRAVEL),
+            ("noreply@uber.com", "Your Thursday morning trip with Uber", [], LABEL_RIDES),
+            ("hello@blablacar.com", "New ride to Madurai Rd, Tirunelveli", [], LABEL_RIDES),
+            ("noreply@zomato.com", "Your Zomato order from Namaste", [], LABEL_FOOD),
+            ("noreply@eatclub.in", "Your order [8ZNIYD] has been delivered", [], LABEL_FOOD),
+            ("prop@magicbricks.com", "Concorde shared details of 3 BHK Flat in your budget", [], LABEL_PROPERTY),
+            ("hello@nobroker.in", "NoBroker : House Visit Request @ 25/02/2025 05:30 PM", [], LABEL_PROPERTY),
+            ("no-reply@razorpay.com", "Payment successful for Decathlon Sports India Pvt Ltd", [], LABEL_PAYMENTS),
+            ("hello@splitwise.com", "Naganath paid you INR15,000.00 on Splitwise", [], LABEL_PAYMENTS),
+            ("invoice+statements@mail.anthropic.com", "Your receipt from Anthropic #2045", [], LABEL_PAYMENTS),
+            ("intimations@cpc.incometax.gov.in", "Your ITR Intimation", ["personal"], LABEL_GOVERNMENT),
+            ("passport.admin@passportindia.gov.in", "Reminder for PSK Appointment", [], LABEL_GOVERNMENT),
+            ("no-reply@email.zebpay.com", "Important Update: Delisting of Tokens from Perpetual Futures", [], LABEL_CRYPTO),
+        ],
+    )
+    def test_routing(self, sender, subject, cats, expected):
+        assert classify_by_rules(meta(sender, subject, cats or ["updates"])) == expected
+
+    def test_shop_marketing_is_clutter(self):
+        email = meta("updates@myntra.com", "Last Minute Shopping, Delivered Next Day ⚡", ["updates"], unsub=True)
+        assert classify_by_rules(email) == LABEL_TO_DELETE
+        assert classify_by_rules(meta("store-news@amazon.in", "Great Indian Festival", ["promotions"])) == LABEL_TO_DELETE
+
+    def test_zomato_marketing_is_clutter(self):
+        assert classify_by_rules(meta("noreply@mailers.zomato.com", "Coming soon...", ["updates"])) == LABEL_TO_DELETE
+
+    def test_food_app_non_order_mail_is_left_for_llm(self):
+        assert classify_by_rules(meta("no-reply@swiggy.in", "That feeling when you...", ["updates"])) is None
+
+    def test_investment_statement_still_wins(self):
+        email = meta("noreply@groww.in", "Transaction and Holding Statement", ["updates"])
+        assert classify_by_rules(email) == LABEL_INVEST_STATEMENTS
 
 
 class TestLlmParsing:
@@ -245,6 +305,11 @@ class TestLlmParsing:
         with patch.object(llm, "_post", return_value=reply):
             email = meta("notify@mg.petsmatefinder.com", "Dhanush S, Found matches for your Pet")
             assert llm.classify_with_llm(email) == (None, None)
+
+    def test_new_categories_map_to_labels(self):
+        reply = {"choices": [{"message": {"content": '{"category": "shopping_order"}'}}]}
+        with patch.object(llm, "_post", return_value=reply):
+            assert llm.classify_with_llm(meta("orders@shop.example", "Your order")) == (LABEL_SHOPPING, None)
 
     def test_other_maps_to_none(self, monkeypatch):
         reply = {"choices": [{"message": {"content": '{"category": "other"}'}}]}
@@ -306,7 +371,7 @@ class TestScanAndApply:
 
     def test_left_alone_emails_are_remembered(self):
         msgs = [
-            _message("1", "no-reply@accounts.google.com", "Security alert"),      # protected
+            _message("1", "hr@micglobal.com", "Payslip for March"),              # protected
             _message("2", "friend@gmail.com", "Dinner?", ["CATEGORY_PERSONAL"]),  # AI: other
             _message("3", "noreply@glassdoor.com", "5 more jobs for you"),         # rule label
         ]
@@ -315,7 +380,7 @@ class TestScanAndApply:
 
     def test_remembered_emails_are_not_read_again(self):
         msgs = [
-            _message("1", "no-reply@accounts.google.com", "Security alert"),
+            _message("1", "hr@micglobal.com", "Payslip for March"),
             _message("3", "noreply@glassdoor.com", "5 more jobs for you"),
         ]
         clf = self._run_scan(msgs, left_alone={"1"})
@@ -407,7 +472,7 @@ class TestScanAndApply:
         assert state.organize_status["skipped"] == 1
 
     def test_protected_mail_never_reaches_llm(self):
-        msgs = [_message("1", "no-reply@accounts.google.com", "Security alert")]
+        msgs = [_message("1", "hr@micglobal.com", "Payslip for March")]
         clf = self._run_scan(msgs, llm_label=LABEL_TO_DELETE)
         assert clf.call_count == 0 and state.organize_plan == {}
         assert state.organize_status["kept"] == 1
@@ -540,6 +605,21 @@ class TestAiMemoryFile:
             assert organize._load_left_alone() == set()
             organize._save_left_alone({"b", "a"})
             assert organize._load_left_alone() == {"a", "b"}
+
+    def test_left_alone_from_older_rules_is_rechecked(self, tmp_path):
+        path = tmp_path / "l.json"
+        path.write_text('["a", "b"]', encoding="utf-8")  # pre-versioning format
+        with patch.object(organize, "_left_alone_path", return_value=str(path)):
+            assert organize._load_left_alone() == set()
+        path.write_text(f'{{"version": {RULES_VERSION}, "ids": ["a"]}}', encoding="utf-8")
+        with patch.object(organize, "_left_alone_path", return_value=str(path)):
+            assert organize._load_left_alone() == {"a"}
+
+    def test_ai_other_answers_from_older_rules_are_dropped(self, tmp_path):
+        path = tmp_path / "m.json"
+        path.write_text('{"a": "", "b": "To Delete"}', encoding="utf-8")  # pre-versioning format
+        with patch.object(organize, "_ai_memory_path", return_value=str(path)):
+            assert organize._load_ai_memory() == {"b": LABEL_TO_DELETE}
 
 
 class TestOrganizeApi:

@@ -21,10 +21,19 @@ from app.core import settings
 from app.services.gmail.organize_rules import (
     LABEL_BANK_ALERTS,
     LABEL_BANK_OFFERS,
+    LABEL_CRYPTO,
+    LABEL_FOOD,
+    LABEL_GOVERNMENT,
     LABEL_INVEST_STATEMENTS,
     LABEL_JOB_ALERTS,
     LABEL_JOB_APPLICATIONS,
+    LABEL_PAYMENTS,
+    LABEL_PROPERTY,
+    LABEL_RIDES,
+    LABEL_SECURITY,
+    LABEL_SHOPPING,
     LABEL_TO_DELETE,
+    LABEL_TRAVEL,
     EmailMeta,
 )
 
@@ -37,6 +46,15 @@ CATEGORIES: dict[str, Optional[str]] = {
     "investment_statement": LABEL_INVEST_STATEMENTS,
     "job_application": LABEL_JOB_APPLICATIONS,
     "job_alert": LABEL_JOB_ALERTS,
+    "shopping_order": LABEL_SHOPPING,
+    "travel_booking": LABEL_TRAVEL,
+    "ride": LABEL_RIDES,
+    "food_order": LABEL_FOOD,
+    "property": LABEL_PROPERTY,
+    "payment": LABEL_PAYMENTS,
+    "security": LABEL_SECURITY,
+    "government": LABEL_GOVERNMENT,
+    "crypto": LABEL_CRYPTO,
     "promotion": LABEL_TO_DELETE,
     "other": None,
 }
@@ -49,8 +67,19 @@ Keys:
 - investment_statement: a statement or report of the user's OWN mutual fund, demat, NPS or broker holdings. Fund marketing, NFOs, factsheets, webinars and market news are NOT statements (use promotion).
 - job_application: about a job the user applied for, or a real recruiter writing personally about a specific role: application received, interview invite or confirmation, assessment, offer. Must look legitimate: named company, specific role, no fees, nothing too good to be true.
 - job_alert: automated job recommendations, job-board newsletters, hiring-drive announcements.
+- shopping_order: an order the user placed with a shop: order confirmed, shipped, out for delivery, delivered, return, refund.
+- travel_booking: the user's own flight, train, bus or hotel booking, ticket, PNR, itinerary, check-in or schedule change.
+- ride: a cab, bike-taxi or carpool trip receipt or ride notice (Uber, Ola, Rapido, BlaBlaCar).
+- food_order: a food delivery order confirmation or delivery update (Zomato, Swiggy, restaurants).
+- property: property listings, rentals, house-visit requests, real-estate portals.
+- payment: a payment receipt, invoice, payment link, money sent or received, split bills (not from a bank).
+- security: login alerts, new device, password, OTP or verification codes, 2FA, vulnerabilities, credential rotation.
+- government: mail from a government department: income tax, Aadhaar, passport, EPF, GST.
+- crypto: updates from a crypto exchange about the user's account (not promotions).
 - promotion: ads, sales, discounts, newsletters, product announcements, marketing, social-network notifications, scams.
-- other: everything else, including personal or work mail, payslips, orders, deliveries, receipts, refunds, tickets, bookings, insurance policies, account or security notices (login alerts, password, 2FA, vulnerabilities, credential rotation), service notices and terms updates.
+- other: everything else, including personal or work mail, payslips, insurance policies, service notices and terms updates.
+
+Marketing from a shop, airline, food app or exchange is promotion, not its order/booking key.
 
 Rules: if unsure, answer other - a wrong "promotion" may get an important email deleted. A job email that asks for money, uses a free-mail address for a big company, or is vague about the company is promotion."""
 

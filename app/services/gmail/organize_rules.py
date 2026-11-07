@@ -24,6 +24,19 @@ LABEL_INVEST_STATEMENTS = "Investments/Statements"
 LABEL_JOB_APPLICATIONS = "Jobs/Applications"
 LABEL_JOB_ALERTS = "Jobs/Alerts"
 LABEL_TO_DELETE = "To Delete"
+LABEL_SHOPPING = "Shopping/Orders"
+LABEL_TRAVEL = "Travel/Bookings"
+LABEL_RIDES = "Travel/Rides"
+LABEL_FOOD = "Food/Orders"
+LABEL_PROPERTY = "Property"
+LABEL_PAYMENTS = "Payments"
+LABEL_SECURITY = "Security"
+LABEL_GOVERNMENT = "Government & Tax"
+LABEL_CRYPTO = "Investments/Crypto"
+
+# Bump when the categories change: emails earlier scans left alone (and AI
+# "other" answers) are then re-checked automatically, since they may now fit.
+RULES_VERSION = 2
 
 SAVINGS = "Savings"
 CREDIT_CARD = "Credit Card"
@@ -98,16 +111,84 @@ NOISE_SENDERS = [
     "digest.groww.in", "campaigns.upstox.com", "quora.com",
     # Marketing-only address; bookings come from other easemytrip.com addresses
     "connect@easemytrip.com",
+    "mailers.zomato.com",  # Zomato's marketing; orders come from zomato.com
 ]
 
-# ----- Keep (never labelled, never sent to the LLM) -----
-# Orders, deliveries, payments, bookings and account/security mail stay where they are.
-KEEP_SENDERS = [
-    "order-update@amazon.in", "shipment-tracking@amazon.in", "auto-confirm@amazon.in",
-    "return@amazon.in", "shopifyemail.com", "delhivery.com", "razorpay.com", "payu.in",
-    "irctc.co.in", "accounts.google.com", "payments-noreply@google.com",
-    "noreply@github.com", "notifications@github.com", "splitwise.com",
+# ----- Everyday categories -----
+# Shops and couriers: order/shipping mail from these -> Shopping/Orders
+SHOPPING_DOMAINS = [
+    "amazon.in", "amazon.com", "flipkart.com", "myntra.com", "ajio.com", "meesho.com",
+    "nykaa.com", "1mg.com", "pharmeasy.in", "netmeds.com", "bigbasket.com", "blinkit.com",
+    "zeptonow.com", "croma.com", "tatacliq.com", "lenskart.com", "coolwinks.com",
+    "snitch.co.in", "decathlon.in", "sharepal.in", "shopifyemail.com", "delhivery.com",
+    "bluedart.com", "ekartlogistics.com", "shiprocket.in", "dunzo.in", "jiomart.com",
 ]
+# Flights, trains, buses and stays -> Travel/Bookings
+TRAVEL_DOMAINS = [
+    "airbnb.com", "irctc.co.in", "airindia.com", "airindia.in", "goindigo.in",
+    "akasaair.com", "spicejet.com", "airvistara.com", "makemytrip.com", "goibibo.com",
+    "cleartrip.com", "easemytrip.com", "yatra.com", "ixigo.com", "agoda.com", "booking.com",
+    "expedia.com", "trip.com", "redbus.in", "abhibus.com", "ksrtc.in", "oyorooms.com",
+    "oyo.com", "staybloom.com", "treebo.com", "fabhotels.com", "zostel.com",
+]
+RIDE_DOMAINS = ["uber.com", "olacabs.com", "rapido.bike", "blablacar.com", "blu-smart.com"]
+# Food delivery: order mail from these -> Food/Orders
+FOOD_DOMAINS = [
+    "zomato.com", "swiggy.in", "eatclub.in", "burgerking.in", "dominos.co.in",
+    "foodpanda.in", "faasos.io", "box8.in", "mcdonaldsindia.com", "magicpin.in",
+]
+PROPERTY_DOMAINS = [
+    "magicbricks.com", "nobroker.in", "housing.com", "99acres.com", "squareyards.com",
+    "commonfloor.com", "nestaway.com", "makaan.com",
+]
+CRYPTO_DOMAINS = [
+    "zebpay.com", "coindcx.com", "wazirx.com", "coinswitch.co", "binance.com",
+    "mudrex.com", "bitbns.com",
+]
+# Any *.gov.in / *.nic.in sender -> Government & Tax
+GOVERNMENT_DOMAINS = ["gov.in", "nic.in"]
+PAYMENT_SENDERS = [
+    "razorpay.com", "payu.in", "splitwise.com", "payments-noreply@google.com",
+    "paypal.com", "phonepe.com", "cashfree.com", "billdesk.com", "mobikwik.com",
+    "instamojo.com", "stripe.com", "paytm.com",
+]
+SECURITY_SENDERS = ["accounts.google.com"]
+# Personal mailboxes: subject-only rules never apply to mail from these
+FREEMAIL_DOMAINS = [
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "outlook.com",
+    "hotmail.com", "live.com", "rediffmail.com", "icloud.com", "proton.me", "protonmail.com",
+]
+
+RE_SECURITY = re.compile(
+    r"security (alert|update|incident|disclosure|advisory|notice|notification)|vulnerabilit|rotate credentials"
+    r"|\b2fa\b|two-factor|password|\botp\b|one[- ]time (password|code)|verification code"
+    r"|login code|verify your|confirm your email|new login|log-?in alert|sign-?in (attempt|alert)"
+    r"|account (was )?(recovered|activated|suspended|locked)|new (mobile )?device"
+    r"|authentication added",
+    re.I,
+)
+RE_ORDER = re.compile(
+    r"\border(s|ed)?\b|shipped|dispatched|out for delivery|delivered|shipment|arriving"
+    r"|return (received|request|pickup)|refund|cancell?ed|installation",
+    re.I,
+)
+RE_ORDER_SENDER = re.compile(r"order|ship|track|deliver|confirm|return", re.I)
+RE_TRAVEL = re.compile(
+    r"booking (confirm|id)|\bpnr\b|e-?ticket|boarding pass|itinerary|web check-?in"
+    r"|reservation|flight|travel policy",
+    re.I,
+)
+RE_PAYMENT = re.compile(
+    r"\breceipt\b|\binvoice|payment (successful|received|confirm|failed|link)"
+    r"|refund (successful|processed|initiated)|paid you|transaction (successful|failed)"
+    r"|money (sent|received)",
+    re.I,
+)
+RE_FORWARD_OR_REPLY = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
+
+# ----- Keep (never labelled, never sent to the LLM) -----
+# Account and work mail no category above claims stays where it is.
+KEEP_SENDERS = ["noreply@github.com", "notifications@github.com"]
 RE_KEEP_SUBJECT = re.compile(
     r"security (alert|update|incident|disclosure|advisory)|vulnerabilit|rotate credentials|\b2fa\b"
     r"|two-factor|password|\botp\b|verification code|verify your|confirm your email|new login"
@@ -201,6 +282,45 @@ def find_bank(email: EmailMeta) -> Optional[tuple[str, bool]]:
     return None
 
 
+def classify_everyday(email: EmailMeta) -> Optional[str]:
+    """Shopping, travel, food, property, payments, security, government and crypto mail."""
+    subject = email.subject or ""
+    # Subject-only rules are for automated mail, not people writing or forwarding
+    automated = not domain_matches(email.domain, FREEMAIL_DOMAINS) and not RE_FORWARD_OR_REPLY.search(subject)
+
+    if sender_matches(email, SECURITY_SENDERS) or (automated and RE_SECURITY.search(subject)):
+        return LABEL_SECURITY
+    if domain_matches(email.domain, INVESTMENT_DOMAINS):
+        return None  # statements and fund mail are handled by the investment rules
+
+    if domain_matches(email.domain, RIDE_DOMAINS):
+        return LABEL_RIDES
+    if domain_matches(email.domain, TRAVEL_DOMAINS):
+        return LABEL_TRAVEL
+    if domain_matches(email.domain, PROPERTY_DOMAINS):
+        return LABEL_PROPERTY
+    if domain_matches(email.domain, CRYPTO_DOMAINS):
+        return LABEL_CRYPTO
+    if domain_matches(email.domain, GOVERNMENT_DOMAINS):
+        return LABEL_GOVERNMENT
+    is_order = bool(RE_ORDER.search(subject))
+    if domain_matches(email.domain, FOOD_DOMAINS):
+        return LABEL_FOOD if is_order else None
+    if sender_matches(email, PAYMENT_SENDERS):
+        return LABEL_PAYMENTS
+    if domain_matches(email.domain, SHOPPING_DOMAINS):
+        return LABEL_SHOPPING if is_order or RE_ORDER_SENDER.search(email.local) else None
+
+    if automated:
+        if RE_TRAVEL.search(subject):
+            return LABEL_TRAVEL
+        if RE_PAYMENT.search(subject):
+            return LABEL_PAYMENTS
+        if is_order:
+            return LABEL_SHOPPING
+    return None
+
+
 # ----- Classifier -----
 
 
@@ -216,10 +336,21 @@ def classify_by_rules(email: EmailMeta) -> Optional[str]:
     if sender_matches(email, NOISE_SENDERS):
         return LABEL_TO_DELETE
 
-    # 1b. Orders, payments, bookings, account & security mail: never touch.
+    # 1b. Everyday mail (orders, trips, payments, security...), then protected mail.
     # Bank mail is excluded here so bank alerts still reach Banks/Alerts below.
-    if find_bank(email) is None and not sender_matches(email, BANK_ALERT_SENDERS):
-        if sender_matches(email, KEEP_SENDERS) or RE_KEEP_SUBJECT.search(subject):
+    is_bankish = (
+        find_bank(email) is not None
+        or sender_matches(email, BANK_ALERT_SENDERS)
+        or sender_matches(email, CARD_MARKETERS)
+    )
+    # A newsletter full of sales words ("Delivered next day ⚡") is an ad, not an order
+    is_ad = email.has_unsubscribe and bool(RE_MARKETING.search(subject))
+    if not is_bankish:
+        if not is_ad and "promotions" not in email.categories:
+            label = classify_everyday(email)
+            if label:
+                return label
+        if sender_matches(email, KEEP_SENDERS) or (not is_ad and RE_KEEP_SUBJECT.search(subject)):
             return KEEP
 
     is_statement = bool(RE_STATEMENT.search(subject)) and not RE_NOT_STATEMENT.search(subject)
@@ -290,6 +421,15 @@ STATIC_LABELS = [
     LABEL_JOB_APPLICATIONS,
     LABEL_JOB_ALERTS,
     LABEL_TO_DELETE,
+    LABEL_SHOPPING,
+    LABEL_TRAVEL,
+    LABEL_RIDES,
+    LABEL_FOOD,
+    LABEL_PROPERTY,
+    LABEL_PAYMENTS,
+    LABEL_SECURITY,
+    LABEL_GOVERNMENT,
+    LABEL_CRYPTO,
 ]
 
 

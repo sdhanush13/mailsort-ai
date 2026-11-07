@@ -23,7 +23,13 @@ from app.core import settings
 from app.services.auth import get_gmail_service
 from app.services.gmail import llm
 from app.services.gmail.helpers import build_gmail_query, get_sender_info
-from app.services.gmail.organize_rules import KEEP, EmailMeta, classify_by_rules, is_managed_label
+from app.services.gmail.organize_rules import (
+    KEEP,
+    RULES_VERSION,
+    EmailMeta,
+    classify_by_rules,
+    is_managed_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,13 +130,27 @@ def _ai_memory_path() -> str:
     return os.path.join(os.path.dirname(os.path.abspath(settings.token_file)), AI_MEMORY_FILE)
 
 
-def _load_ai_memory() -> dict[str, str]:
+def _read_versioned(path: str, key: str):
+    """Return (version, payload); files from before versioning count as version 1."""
     try:
-        with open(_ai_memory_path(), encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
     except (OSError, ValueError):
+        return RULES_VERSION, None
+    if isinstance(data, dict) and "version" in data:
+        return data.get("version"), data.get(key)
+    return 1, data
+
+
+def _load_ai_memory() -> dict[str, str]:
+    version, data = _read_versioned(_ai_memory_path(), "answers")
+    if not isinstance(data, dict):
         return {}
+    memory = {str(k): str(v) for k, v in data.items()}
+    if version != RULES_VERSION:
+        # The categories changed: keep real labels, re-ask the AI about "other" answers
+        memory = {k: v for k, v in memory.items() if v}
+    return memory
 
 
 def _write_json(path: str, data) -> None:
@@ -144,7 +164,7 @@ def _write_json(path: str, data) -> None:
 
 
 def _save_ai_memory(memory: dict[str, str]) -> None:
-    _write_json(_ai_memory_path(), memory)
+    _write_json(_ai_memory_path(), {"version": RULES_VERSION, "answers": memory})
 
 
 # Emails a scan decided to leave alone (protected mail, or the AI said "other").
@@ -158,16 +178,14 @@ def _left_alone_path() -> str:
 
 
 def _load_left_alone() -> set[str]:
-    try:
-        with open(_left_alone_path(), encoding="utf-8") as f:
-            data = json.load(f)
-        return {str(x) for x in data} if isinstance(data, list) else set()
-    except (OSError, ValueError):
-        return set()
+    version, data = _read_versioned(_left_alone_path(), "ids")
+    if version != RULES_VERSION or not isinstance(data, list):
+        return set()  # new categories may fit them now, so check them all again
+    return {str(x) for x in data}
 
 
 def _save_left_alone(ids: set[str]) -> None:
-    _write_json(_left_alone_path(), sorted(ids))
+    _write_json(_left_alone_path(), {"version": RULES_VERSION, "ids": sorted(ids)})
 
 
 def _fetch_metadata(service, ids: list[str], on_progress) -> list[dict]:

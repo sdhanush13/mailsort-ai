@@ -33,9 +33,20 @@
 | `Investments/Statements` | CDSL/NSDL, CAMS/KFintech, mutual fund and broker statements |
 | `Jobs/Applications` | Real application updates from company career sites and applicant tracking systems (Workday, Greenhouse, Lever, ...) |
 | `Jobs/Alerts` | Job-board mail: Naukri, LinkedIn, Indeed, Glassdoor, foundit, Instahyre, ... |
+| `Investments/Crypto` | Account updates from crypto exchanges (Zebpay, CoinDCX, WazirX, ...) |
+| `Shopping/Orders` | Order, shipping, delivery and return mail (Amazon, Flipkart, Myntra, Shopify stores, couriers, ...) |
+| `Travel/Bookings` | Flights, trains, buses and stays: IRCTC, Airbnb, IndiGo, Air India, Agoda, MakeMyTrip, PNRs, itineraries |
+| `Travel/Rides` | Uber, Ola, Rapido and BlaBlaCar trips |
+| `Food/Orders` | Zomato, Swiggy and restaurant order updates (their ads go to `To Delete`) |
+| `Property` | MagicBricks, NoBroker, Housing.com and 99acres listings and visit requests |
+| `Payments` | Receipts, invoices, payment links and refunds: Razorpay, PayU, Splitwise, PayPal, ... |
+| `Security` | Login alerts, new devices, password resets, OTPs and verification codes, 2FA, vulnerability notices |
+| `Government & Tax` | Income Tax, Aadhaar, passport and other `*.gov.in` mail |
 | `To Delete` | Promotions, newsletters and ads. **They are only labelled, never deleted**, so you review and delete them yourself. |
 
-Important mail is **never touched**: security alerts, OTPs, password resets, orders and deliveries, invoices, payslips, bookings and so on stay exactly where they are.
+Mail from people (personal and work), payslips, insurance policies and anything unclear is **never touched**. It stays exactly where it is. Rules that match on the subject alone skip personal mailboxes (Gmail, Yahoo, Outlook, ...) and forwarded or replied threads.
+
+When a new version adds categories, the next scan re-checks emails that earlier scans left alone, because they may now fit somewhere.
 
 ### Rules first, AI second
 
